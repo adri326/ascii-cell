@@ -1,0 +1,21 @@
+{
+  "name": "ascii-cell",
+  "version": "0.1.0",
+  "description": "A frontend library for making cellular automatons, rendered as ASCII art!",
+  "main": "index.js",
+  "repository": "https://github.com/adri326/ascii-cell/",
+  "author": "Shad Amethyst",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.0.1",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}
