@@ -1,45 +1,63 @@
 import { createEffect, createSignal, onMount } from 'solid-js';
 import { render } from 'solid-js/web';
 import simulation from '../src/simulation.jsx';
+import { PixelFont } from '../src/font.jsx';
 
-const KIND_DEAD = 0;
-const KIND_ALIVE = 1;
+const Moxie6 = await fetch("./WaraleFont-Medium.pfs").then(res => res.text());
+
+type State = {
+    alive: boolean,
+    char: string
+};
 
 function App() {
-    const sim = simulation<0 | 1>({
-        defaultState: KIND_DEAD,
+    const sim = simulation<State>({
+        defaultState: {
+            alive: false,
+            char: " ",
+        },
+        font: new PixelFont(Moxie6),
         getChar(state) {
-            if (state === 0) return " ";
-            else return "\u{2588}";
+            return state.char;
         },
         getColor(state) {
-            return "black";
+            return state.alive ? "black" : "lightgray";
         },
         getBackground(state) {
             return "white";
         }
     });
 
+    function newCell(): State {
+        let alphabet = "abcdefghijklmnopqrstuvwxyz";
+        alphabet = alphabet + alphabet.toUpperCase();
+        return {
+            alive: true,
+            char: alphabet[Math.floor(Math.random() * alphabet.length)],
+        }
+    }
+
     let canvas: HTMLCanvasElement;
 
     onMount(() => {
-        sim.render(canvas);
-        const ctx = canvas.getContext("2d")!;
-        ctx.fillStyle = "green";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        sim.set(1, 1, KIND_ALIVE);
-        sim.set(2, 2, KIND_ALIVE);
-        sim.set(3, 2, KIND_ALIVE);
-        sim.set(3, 1, KIND_ALIVE);
-        sim.set(3, 0, KIND_ALIVE);
+        sim.set(1, 1, newCell());
+        sim.set(2, 2, newCell());
+        sim.set(3, 2, newCell());
+        sim.set(3, 1, newCell());
+        sim.set(3, 0, newCell());
 
         sim.render(canvas);
     });
 
     return <div>
-        <canvas width={20 * 8} height={20 * 8} ref={(c) => canvas = c}></canvas>
-
+        <canvas
+            style={{
+                "image-rendering": "pixelated"
+            }}
+            width={20 * 6}
+            height={20 * 6}
+            ref={(c) => canvas = c}
+        ></canvas>
     </div>;
 }
 

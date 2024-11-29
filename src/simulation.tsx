@@ -1,3 +1,5 @@
+import type { Font } from "./font.js";
+
 class Grid<T extends CellCompatible> {
     private _width: number;
     private _height: number;
@@ -88,6 +90,7 @@ export type CellCompatible = number | boolean | object;
 
 export type Options<T> = {
     defaultState: T,
+    font: Font,
     getChar: (state: T) => string,
     getColor: (state: T) => string,
     getBackground: (state: T) => string,
@@ -102,7 +105,7 @@ function renderChar(ctx: CanvasRenderingContext2D, char: string, color: string, 
     ctx.clearRect(sx, sy, char_width, char_height);
     if (char !== " ") {
         ctx.fillStyle = color;
-        ctx.fillRect(sx + 1, sy + 1, char_width - 2, char_height - 2);
+        ctx.fillRect(sx, sy, char_width, char_height);
     }
 }
 
@@ -121,14 +124,20 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
             const ctx = canvas.getContext("2d");
             if (!ctx) throw new Error("Could not get 2D context");
 
-
             for (let y = cells.top; y < cells.top + cells.height; y++) {
                 for (let x = cells.left; x < cells.left + cells.width; x++) {
-                    if (dirty.get(x, y)) {
-                        dirty.set(x, y, false);
-                        const state = cells.get(x, y)!;
-                        renderChar(ctx, options.getChar(state), options.getColor(state), options.getBackground(state), x, y);
-                    }
+                    if (!dirty.get(x, y)) continue;
+                    dirty.set(x, y, false);
+                    const state = cells.get(x, y)!;
+
+                    options.font.drawChar(
+                        ctx,
+                        options.getChar(state),
+                        x,
+                        y,
+                        options.getColor(state),
+                        options.getBackground(state),
+                    );
                 }
             }
         }
