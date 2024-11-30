@@ -37,10 +37,11 @@ export class PixelFont implements Font {
         this.width = width;
         if (heightMode === "descender") {
             this.height = ascend - descend;
+            this.yOffset = baseline - ascend;
         } else {
             this.height = height;
+            this.yOffset = 0;
         }
-        this.yOffset = baseline - ascend;
 
         const spaceGlyph = document.createElement("canvas");
         spaceGlyph.width = this.width;

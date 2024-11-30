@@ -10,6 +10,10 @@ type State = {
     char: string
 };
 
+const NEIGHBORHOOD = [-1, 0, 1].flatMap(
+    (dy): [dx: number, dy: number][] => [[dy, -1], [dy, 0], [dy, 1]]
+).filter(([dx, dy]) => dx !== 0 || dy !== 0);
+
 function App() {
     const sim = simulation<State>({
         defaultState: {
@@ -21,16 +25,37 @@ function App() {
             return state.char;
         },
         getColor(state) {
-            return state.alive ? "black" : "lightgray";
+            return state.alive ? "white" : "lightgray";
         },
         getBackground(state) {
-            return "white";
+            return state.alive ? "black" : "white";
+        },
+        onTick(state, x, y, handle) {
+            let neighbors = NEIGHBORHOOD.map(
+                ([dx, dy]) => handle.get(x + dx, y + dy)?.alive || false
+            ).reduce((acc, curr) => acc + Number(curr), 0);
+
+            if (state.alive && (neighbors < 2 || neighbors > 3)) {
+                handle.update(x, y, (s) => {
+                    return {
+                        ...s,
+                        alive: false,
+                    };
+                });
+            } else if (!state.alive && neighbors === 3) {
+                handle.update(x, y, (s) => {
+                    if (s.char === ' ') return newCell();
+                    else return {
+                        ...s,
+                        alive: true
+                    };
+                });
+            }
         }
     });
 
     function newCell(): State {
-        let alphabet = "abcdefghijklmnopqrstuvwxyz";
-        alphabet = alphabet + alphabet.toUpperCase();
+        let alphabet = "0123456789+-/=*?!≠±$£≤≥";
         return {
             alive: true,
             char: alphabet[Math.floor(Math.random() * alphabet.length)],
@@ -39,14 +64,27 @@ function App() {
 
     let canvas: HTMLCanvasElement;
 
+    function onFrame(_elapsed: number) {
+        sim.tick();
+        sim.render(canvas);
+        setTimeout(() => {
+            window.requestAnimationFrame(onFrame);
+        }, 1000);
+    }
+
     onMount(() => {
-        sim.set(1, 1, newCell());
+        sim.set(0, 3, newCell());
+        sim.set(1, 3, newCell());
+        sim.set(1, 4, newCell());
+        sim.set(2, 3, newCell());
         sim.set(2, 2, newCell());
+        sim.set(2, 1, newCell());
         sim.set(3, 2, newCell());
         sim.set(3, 1, newCell());
-        sim.set(3, 0, newCell());
 
         sim.render(canvas);
+
+        window.requestAnimationFrame(onFrame);
     });
 
     return <div>

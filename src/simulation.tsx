@@ -88,37 +88,71 @@ class Grid<T extends CellCompatible> {
 
 export type CellCompatible = number | boolean | object;
 
-export type Options<T> = {
+export type Options<T extends CellCompatible> = {
     defaultState: T,
     font: Font,
-    getChar: (state: T) => string,
-    getColor: (state: T) => string,
-    getBackground: (state: T) => string,
+    getChar(state: T): string,
+    getColor(state: T): string,
+    getBackground(state: T): string,
+    onTick?(state: T, x: number, y: number, handle: SimulationHandle<T>): void,
 };
 
-function renderChar(ctx: CanvasRenderingContext2D, char: string, color: string, background: string, x: number, y: number) {
-    const sx = x * 8;
-    const sy = y * 8;
-    const char_width = 8;
-    const char_height = 8;
+export type SimulationHandle<T extends CellCompatible> = {
+    /// Immediately sets the cell's contents; do *not* use this during `onTick`.
+    set(x: number, y: number, state: T): void;
 
-    ctx.clearRect(sx, sy, char_width, char_height);
-    if (char !== " ") {
-        ctx.fillStyle = color;
-        ctx.fillRect(sx, sy, char_width, char_height);
-    }
-}
+    /// Updates the cell's contents. This method is safe to use during `onTick`,
+    /// as long as it returns a new object
+    update(x: number, y: number, update: (prev: Readonly<T>) => T): void;
+
+    /// Returns the current cell contents.
+    get(x: number, y: number): T | null;
+
+    /// Runs a single simulation step
+    tick(): void;
+
+
+    /// Renders the scene onto `canvas`.
+    render(canvas: HTMLCanvasElement): void;
+};
 
 export default function simulation<T extends CellCompatible>(options: Options<T>) {
     const cells = new Grid(0, 0, 20, 20, options.defaultState);
     const dirty = new Grid<boolean>(0, 0, 20, 20, true);
+    const actions: [x: number, y: number, callback: (prev: Readonly<T>) => T][] = [];
 
-    return {
+    const res = {
         set(x: number, y: number, state: T) {
             if (!cells.set(x, y, state)) {
                 throw new Error("resizing not yet implemented");
             }
             dirty.set(x, y, true);
+        },
+        get(x: number, y: number): T | null {
+            return cells.get(x, y);
+        },
+        update(x: number, y: number, callback: (prev: Readonly<T>) => T) {
+            actions.push([x, y, callback]);
+        },
+        tick() {
+            let onTick = options.onTick;
+            if (onTick) {
+                for (let y = cells.top; y < cells.top + cells.height; y++) {
+                    for (let x = cells.left; x < cells.left + cells.width; x++) {
+                        onTick(cells.get(x, y)!, x, y, res);
+                    }
+                }
+            }
+
+            for (const [x, y, update] of actions) {
+                let prev = cells.get(x, y);
+                if (prev !== null) {
+                    cells.set(x, y, update(prev));
+                    dirty.set(x, y, true);
+                }
+            }
+
+            actions.length = 0;
         },
         render(canvas: HTMLCanvasElement) {
             const ctx = canvas.getContext("2d");
@@ -142,4 +176,6 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
             }
         }
     };
+
+    return res;
 }
