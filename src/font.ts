@@ -1,7 +1,5 @@
 import Base64 from "base64-js";
-
-// TODO: remove
-type Color = string;
+import type { Color } from "./simulation.js";
 
 export interface Font {
     charWidth(): number;

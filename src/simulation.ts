@@ -1,6 +1,7 @@
 import type { Font } from "./font.js";
 
 export type CellCompatible = number | boolean | object;
+export type Color = string;
 
 export type Options<T extends CellCompatible> = {
     defaultState: T,

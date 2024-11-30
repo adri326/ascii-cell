@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onMount } from 'solid-js';
 import { render } from 'solid-js/web';
-import simulation from '../src/simulation.jsx';
-import { PixelFont } from '../src/font.jsx';
+import simulation from '../src/simulation.js';
+import { PixelFont } from '../src/font.js';
 import { PixelPerfectCanvas } from "@shadryx/pptk/solid";
 import classes from "./test.module.css";
 
