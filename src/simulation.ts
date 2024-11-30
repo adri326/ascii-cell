@@ -1,14 +1,15 @@
 import type { Font } from "./font.js";
+import type { Color } from "./color.js";
+import { ProcessedCell, SimulationEffect } from "./effect.js";
 
 export type CellCompatible = number | boolean | object;
-export type Color = string;
 
 export type Options<T extends CellCompatible> = {
     defaultState: T,
     font: Font,
     getChar(state: T, x: number, y: number): string,
-    getColor(state: T, x: number, y: number): string,
-    getBackground(state: T, x: number, y: number): string,
+    getColor(state: T, x: number, y: number): Color,
+    getBackground(state: T, x: number, y: number): Color,
     onTick?(state: T, x: number, y: number, handle: SimulationHandle<T>): void,
 
     /// How big the simulation is allowed to get.
@@ -30,6 +31,12 @@ export type SimulationHandle<T extends CellCompatible> = Readonly<{
     /// as long as it returns a new object
     update(x: number, y: number, update: (prev: Readonly<T>) => T): void;
 
+    /// Registers the effect to be applied to the simulation render.
+    addEffect(effect: SimulationEffect<T>): void;
+
+    /// Clears all effects currently affecting the cell at `(x, y)`
+    clearEffects(x: number, y: number): void;
+
     /// Returns the current cell contents.
     get(x: number, y: number): T | null;
 
@@ -48,6 +55,8 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
 
     let cells = new Grid(getSimulationBounds(), options.defaultState);
     let dirty = new Grid<boolean>(getSimulationBounds(), true);
+    let effectGrid = new Grid<SimulationEffect<T>[]>(getSimulationBounds(), () => []);
+    const effects: SimulationEffect<T>[] = [];
     const actions: [x: number, y: number, callback: (prev: Readonly<T>) => T][] = [];
 
     let previousCanvas: HTMLCanvasElement | null = null;
@@ -56,6 +65,7 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
     function resize(newBounds: Rect) {
         cells = new Grid(newBounds, cells, options.defaultState);
         dirty = new Grid(newBounds, dirty, true);
+        effectGrid = new Grid(newBounds, effectGrid, () => []);
     }
 
     const res = {
@@ -71,7 +81,30 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
         update(x: number, y: number, callback: (prev: Readonly<T>) => T) {
             actions.push([x, y, callback]);
         },
+        addEffect(effect: SimulationEffect<T>) {
+            if (effect.done()) return;
+
+            effects.push(effect);
+            for (const [x, y] of effect.affectedCells()) {
+                effectGrid.get(x, y)?.push(effect);
+            }
+        },
+        clearEffects(x: number, y: number) {
+            const effects = effectGrid.get(x, y);
+            if (effects) effects.length = 0;
+        },
         tick() {
+            // Increment all effects before everything else
+            for (const effect of effects) {
+                effect.nextTick();
+            }
+            for (let i = 0; i < effects.length; i++) {
+                if (effects[i].done()) {
+                    effects.splice(i, 1);
+                    i--;
+                }
+            }
+
             let onTick = options.onTick;
             if (onTick) {
                 for (let y = cells.top; y < cells.top + cells.height; y++) {
@@ -109,9 +142,9 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
             }
 
             if (rerender) {
-                renderAll(cells, dirty, canvas, options, rect);
+                renderAll(cells, dirty, effectGrid, canvas, options, rect, res);
             } else {
-                renderDirty(cells, dirty, canvas, options, rect);
+                renderDirty(cells, dirty, effectGrid, canvas, options, rect, res);
             }
         }
     } satisfies SimulationHandle<T>;
@@ -132,12 +165,12 @@ class Grid<T extends CellCompatible> {
     );
     constructor(
         rect: Rect,
-        blitFrom: Grid<T>, fillDefault: T
+        blitFrom: Grid<T>, fillDefault: T | ((x: number, y: number) => T)
     );
     constructor(
         rect: Rect,
         fill: T | ((x: number, y: number) => T) | Grid<T>,
-        fillDefault?: T
+        fillDefault?: T | ((x: number, y: number) => T)
     ) {
         this._left = rect.x;
         this._top = rect.y;
@@ -153,10 +186,14 @@ class Grid<T extends CellCompatible> {
             });
         } else if (fill instanceof Grid) {
             this.data = new Array(rect.width * rect.height).fill(null).map((_, i) => {
-                return fill.get(
-                    i % rect.width + rect.x,
-                    Math.floor(i / rect.width) + rect.y
-                ) ?? fillDefault!;
+                const x = i % rect.width + rect.x;
+                const y = Math.floor(i / rect.width) + rect.y;
+
+                const res = fill.get(x, y);
+                if (res !== null) return res;
+
+                if (typeof fillDefault === "function") return fillDefault(x, y);
+                else return fillDefault!
             });
         } else {
             let x = fill;
@@ -223,26 +260,48 @@ function renderSingle<T extends CellCompatible>(
     x: number,
     y: number,
     options: Options<T>,
-    rect: Rect
+    rect: Rect,
+    effects: SimulationEffect<T>[],
+    handle: SimulationHandle<T>,
 ) {
     const state = cells.get(x, y)!;
 
+    const processed: ProcessedCell<T> = {
+        state,
+        x,
+        y,
+        glyph: options.getChar(state, x, y),
+        fg: options.getColor(state, x, y),
+        bg: options.getBackground(state, x, y)
+    };
+
+    for (let i = 0; i < effects.length; i++) {
+        if (effects[i].done()) {
+            effects.splice(i, 1);
+            i--;
+            continue;
+        }
+        effects[i].tweakCell(processed, handle);
+    }
+
     options.font.drawChar(
         ctx,
-        options.getChar(state, x, y),
+        processed.glyph,
         x - rect.x,
         y - rect.y,
-        options.getColor(state, x, y),
-        options.getBackground(state, x, y),
+        processed.fg,
+        processed.bg,
     );
 }
 
 function renderAll<T extends CellCompatible>(
     cells: Grid<T>,
     dirty: Grid<boolean>,
+    effectGrid: Grid<SimulationEffect<T>[]>,
     canvas: HTMLCanvasElement,
     options: Options<T>,
-    rect: Rect
+    rect: Rect,
+    handle: SimulationHandle<T>,
 ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Could not get 2D context");
@@ -250,7 +309,8 @@ function renderAll<T extends CellCompatible>(
     for (let y = rect.y; y < rect.y + rect.height; y++) {
         for (let x = rect.x; x < rect.x + rect.width; x++) {
             if (dirty.set(x, y, false)) {
-                renderSingle(ctx, cells, x, y, options, rect);
+                const effects = effectGrid.get(x, y)!;
+                renderSingle(ctx, cells, x, y, options, rect, effects, handle);
             }
         }
     }
@@ -259,19 +319,22 @@ function renderAll<T extends CellCompatible>(
 function renderDirty<T extends CellCompatible>(
     cells: Grid<T>,
     dirty: Grid<boolean>,
+    effectGrid: Grid<SimulationEffect<T>[]>,
     canvas: HTMLCanvasElement,
     options: Options<T>,
-    rect: Rect
+    rect: Rect,
+    handle: SimulationHandle<T>,
 ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Could not get 2D context");
 
     for (let y = rect.y; y < rect.y + rect.height; y++) {
         for (let x = rect.x; x < rect.x + rect.width; x++) {
-            if (!dirty.get(x, y)) continue;
+            const effects = effectGrid.get(x, y)!;
+            if (!dirty.get(x, y) && !effects?.length) continue;
             dirty.set(x, y, false);
 
-            renderSingle(ctx, cells, x, y, options, rect);
+            renderSingle(ctx, cells, x, y, options, rect, effects, handle);
         }
     }
 }

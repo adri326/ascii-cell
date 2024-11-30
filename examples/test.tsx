@@ -4,6 +4,7 @@ import simulation from '../src/simulation.js';
 import { PixelFont } from '../src/font.js';
 import { PixelPerfectCanvas } from "@shadryx/pptk/solid";
 import classes from "./test.module.css";
+import { FadeEffect } from '../src/effect.js';
 
 const Moxie6 = await fetch("./WaraleFont-Medium.pfs").then(res => res.text());
 
@@ -39,10 +40,10 @@ function App() {
             return state.char;
         },
         getColor(state) {
-            return state.alive ? "white" : "lightgray";
+            return state.alive ? [0.008, 0.008, 0.008] : [0.02, 0.02, 0.02];
         },
         getBackground(state) {
-            return state.alive ? "black" : "white";
+            return state.alive ? [0.8, 0.8, 0.8] : [0.0, 0.0, 0.0];
         },
         onTick(state, x, y, handle) {
             let neighbors = 0;
@@ -57,6 +58,11 @@ function App() {
                         alive: false,
                     };
                 });
+                handle.addEffect(new FadeEffect(x, y, {
+                    fg: [0.2, 0.2, 0.2],
+                    bg: [0.01, 0.01, 0.01],
+                    length: 8,
+                }));
             } else if (!state.alive && neighbors === 3) {
                 handle.update(x, y, (s) => {
                     if (s.char === ' ') return newCell();
@@ -65,6 +71,7 @@ function App() {
                         alive: true
                     };
                 });
+                handle.clearEffects(x, y);
             }
         },
         simulationBounds: () => {
@@ -119,6 +126,12 @@ function App() {
     sim.set(2 + sx, 1 + sy, newCell());
     sim.set(3 + sx, 2 + sy, newCell());
     sim.set(3 + sx, 1 + sy, newCell());
+
+    // sim.set(0 + sx, 2 + sx, newCell());
+    // sim.set(1 + sx, 2 + sx, newCell());
+    // sim.set(2 + sx, 2 + sx, newCell());
+    // sim.set(2 + sx, 1 + sx, newCell());
+    // sim.set(1 + sx, 0 + sx, newCell());
 
     return <PixelPerfectCanvas
             onAttach={(c) => {

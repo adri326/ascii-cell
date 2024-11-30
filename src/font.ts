@@ -1,5 +1,5 @@
 import Base64 from "base64-js";
-import type { Color } from "./simulation.js";
+import { type Color, colorToString } from "./color.js";
 
 export interface Font {
     charWidth(): number;
@@ -109,13 +109,13 @@ export class PixelFont implements Font {
 
         ctx.clearRect(sx, sy, this.width, this.height);
         ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = bg;
+        ctx.fillStyle = colorToString(bg);
         ctx.fillRect(sx, sy, this.width, this.height);
         ctx.globalCompositeOperation = "destination-out";
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(glyphCanvas, sx, sy);
         ctx.globalCompositeOperation = "destination-over";
-        ctx.fillStyle = fg;
+        ctx.fillStyle = colorToString(fg);
         ctx.fillRect(sx, sy, this.width, this.height);
     }
 }
