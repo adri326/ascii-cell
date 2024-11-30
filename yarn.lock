@@ -405,6 +405,11 @@
   resolved "https://registry.yarnpkg.com/@rollup/rollup-win32-x64-msvc/-/rollup-win32-x64-msvc-4.27.4.tgz#67d516613c9f2fe42e2d8b78e252d0003179d92c"
   integrity sha512-3j4jx1TppORdTAoBJRd+/wJRGCPC0ETWkXOecJ6PPZLj6SptXkrXcNqdj0oclbKML6FkQltdz7bBA3rUSirZug==
 
+"@shadryx/pptk@^0.1.10":
+  version "0.1.10"
+  resolved "https://registry.yarnpkg.com/@shadryx/pptk/-/pptk-0.1.10.tgz#a25cdac8f5c3ffb60dd63a2f1ad4e23f9bd133b3"
+  integrity sha512-L7K5uAX4Fp1G+IpJF+lIbv8omw6bDVHR/7E9LyV5g76fZndXi7ZSU1X+jqf9ZQuEtWgvNCJfDseIxNuBbj/5ew==
+
 "@types/babel__core@^7.20.4":
   version "7.20.5"
   resolved "https://registry.yarnpkg.com/@types/babel__core/-/babel__core-7.20.5.tgz#3df15f27ba85319caa07ba08d0721889bb39c017"

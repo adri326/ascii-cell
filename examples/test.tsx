@@ -2,6 +2,8 @@ import { createEffect, createSignal, onMount } from 'solid-js';
 import { render } from 'solid-js/web';
 import simulation from '../src/simulation.jsx';
 import { PixelFont } from '../src/font.jsx';
+import { PixelPerfectCanvas } from "@shadryx/pptk/solid";
+import classes from "./test.module.css";
 
 const Moxie6 = await fetch("./WaraleFont-Medium.pfs").then(res => res.text());
 
@@ -15,12 +17,24 @@ const NEIGHBORHOOD = [-1, 0, 1].flatMap(
 ).filter(([dx, dy]) => dx !== 0 || dy !== 0);
 
 function App() {
+    const font = new PixelFont(Moxie6);
+    let canvas: HTMLCanvasElement | null = null;
+
+    function getBounds() {
+        return {
+            x: 0,
+            y: 0,
+            width: Math.ceil((canvas?.width ?? 0) / font.charWidth()),
+            height: Math.ceil((canvas?.height ?? 0) / font.charHeight()),
+        }
+    }
+
     const sim = simulation<State>({
         defaultState: {
             alive: false,
             char: " ",
         },
-        font: new PixelFont(Moxie6),
+        font,
         getChar(state) {
             return state.char;
         },
@@ -31,9 +45,10 @@ function App() {
             return state.alive ? "black" : "white";
         },
         onTick(state, x, y, handle) {
-            let neighbors = NEIGHBORHOOD.map(
-                ([dx, dy]) => handle.get(x + dx, y + dy)?.alive || false
-            ).reduce((acc, curr) => acc + Number(curr), 0);
+            let neighbors = 0;
+            for (const [dx, dy] of NEIGHBORHOOD) {
+                neighbors += Number(handle.get(x + dx, y + dy)?.alive || false);
+            }
 
             if (state.alive && (neighbors < 2 || neighbors > 3)) {
                 handle.update(x, y, (s) => {
@@ -51,6 +66,15 @@ function App() {
                     };
                 });
             }
+        },
+        simulationBounds: () => {
+            let bounds = getBounds();
+            return {
+                x: bounds.x - 20,
+                y: bounds.y - 20,
+                width: bounds.width + 40,
+                height: bounds.height + 40,
+            };
         }
     });
 
@@ -62,41 +86,55 @@ function App() {
         }
     }
 
-    let canvas: HTMLCanvasElement;
+    let attached = false;
 
-    function onFrame(_elapsed: number) {
-        sim.tick();
-        sim.render(canvas);
-        setTimeout(() => {
-            window.requestAnimationFrame(onFrame);
-        }, 1000);
+    let prevTick = performance.now();
+    function render(rerender: boolean = false) {
+        if (!canvas) return;
+        sim.render(canvas, getBounds(), rerender);
     }
 
-    onMount(() => {
-        sim.set(0, 3, newCell());
-        sim.set(1, 3, newCell());
-        sim.set(1, 4, newCell());
-        sim.set(2, 3, newCell());
-        sim.set(2, 2, newCell());
-        sim.set(2, 1, newCell());
-        sim.set(3, 2, newCell());
-        sim.set(3, 1, newCell());
+    function onFrame() {
+        if (!canvas) return;
+        const now = performance.now();
+        if (now - prevTick > 100) {
+            sim.tick();
+            prevTick = now;
+        }
 
-        sim.render(canvas);
+        render();
 
-        window.requestAnimationFrame(onFrame);
-    });
+        if (attached) {
+            window.requestAnimationFrame(onFrame);
+        }
+    }
 
-    return <div>
-        <canvas
-            style={{
-                "image-rendering": "pixelated"
+    const sx = 10;
+    const sy = 10;
+    sim.set(0 + sx, 3 + sy, newCell());
+    sim.set(1 + sx, 3 + sy, newCell());
+    sim.set(1 + sx, 4 + sy, newCell());
+    sim.set(2 + sx, 3 + sy, newCell());
+    sim.set(2 + sx, 2 + sy, newCell());
+    sim.set(2 + sx, 1 + sy, newCell());
+    sim.set(3 + sx, 2 + sy, newCell());
+    sim.set(3 + sx, 1 + sy, newCell());
+
+    return <PixelPerfectCanvas
+            onAttach={(c) => {
+                attached = true;
+                canvas = c;
+                onFrame();
             }}
-            width={20 * 6}
-            height={20 * 6}
-            ref={(c) => canvas = c}
-        ></canvas>
-    </div>;
+            onDetach={() => {
+                attached = false;
+            }}
+            onResize={(canvas) => {
+                render(true);
+            }}
+            downscale={Math.round(window.devicePixelRatio)}
+            class={classes["canvas"]}
+        />;
 }
 
 render(App, document.body);
