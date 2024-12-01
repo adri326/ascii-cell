@@ -6,16 +6,16 @@ export type CellCompatible = number | boolean | object;
 
 export const SLEEP = Symbol("SLEEP");
 
-export type Options<T extends CellCompatible> = {
+export type SimulationOptions<T extends CellCompatible> = {
     defaultState: T,
-    font: Font,
     getChar(state: T, x: number, y: number): string,
     getColor(state: T, x: number, y: number): Color,
     getBackground(state: T, x: number, y: number): Color,
+    onInit?(handle: SimulationHandle<T>): void,
     onTick?(state: T, x: number, y: number, handle: SimulationHandle<T>): void | typeof SLEEP,
 
     /// How big the simulation is allowed to get.
-    simulationBounds: Rect | (() => Rect),
+    simulationBounds?: Rect | (() => Rect),
 
     /// If set, indicates how far a cell who is awake may affect other cells.
     wakeRadius?: number,
@@ -58,18 +58,23 @@ export type SimulationHandle<T extends CellCompatible> = Readonly<{
     tick(): void;
 
     /// Renders the scene onto `canvas`.
-    render(canvas: HTMLCanvasElement, rect?: Rect, rerender?: boolean): void;
+    render(canvas: HTMLCanvasElement, font: Font, rect?: Rect, rerender?: boolean): void;
 }>;
 
 const ASLEEP_RATIO: number = 8;
 
-export default function simulation<T extends CellCompatible>(options: Options<T>) {
+export default function simulation<T extends CellCompatible>(options: SimulationOptions<T>) {
     function getSimulationBounds(): Rect {
         if (typeof options.simulationBounds === "function") return options.simulationBounds();
-        else return options.simulationBounds;
+        else return options.simulationBounds ?? {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 8
+        };
     }
 
-    const onTick: Exclude<Options<T>["onTick"], undefined> = options.onTick ?? (() => {});
+    const onTick: Exclude<SimulationOptions<T>["onTick"], undefined> = options.onTick ?? (() => {});
 
     let cells = new Grid(getSimulationBounds(), options.defaultState);
     let dirty = new Grid<boolean>(getSimulationBounds(), true);
@@ -163,7 +168,7 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
 
             actions.length = 0;
         },
-        render(canvas: HTMLCanvasElement, rectOpt?: Rect, _rerender?: boolean) {
+        render(canvas: HTMLCanvasElement, font: Font, rectOpt?: Rect, _rerender?: boolean) {
             let rerender = _rerender ?? false;
             const rect = rectOpt ?? cells.getRect();
             if (canvas !== previousCanvas) {
@@ -176,9 +181,9 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
             }
 
             if (rerender || options.debug?.alwaysRender) {
-                renderAll(cells, dirty, effectGrid, canvas, options, rect, res);
+                renderAll(cells, dirty, effectGrid, canvas, options, font, rect, res);
             } else {
-                renderDirty(cells, dirty, effectGrid, canvas, options, rect, res);
+                renderDirty(cells, dirty, effectGrid, canvas, options, font, rect, res);
             }
 
             if (options.debug?.sleep) {
@@ -192,16 +197,18 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
                             ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
                         }
                         ctx.fillRect(
-                            (gx * ASLEEP_RATIO - rect.x) * options.font.charWidth(),
-                            (gy * ASLEEP_RATIO - rect.y) * options.font.charHeight(),
-                            ASLEEP_RATIO * options.font.charWidth(),
-                            ASLEEP_RATIO * options.font.charHeight()
+                            (gx * ASLEEP_RATIO - rect.x) * font.charWidth(),
+                            (gy * ASLEEP_RATIO - rect.y) * font.charHeight(),
+                            ASLEEP_RATIO * font.charWidth(),
+                            ASLEEP_RATIO * font.charHeight()
                         );
                     }
                 }
             }
         }
     } satisfies SimulationHandle<T>;
+
+    options.onInit?.(res);
 
     return res;
 }
@@ -381,7 +388,8 @@ function renderSingle<T extends CellCompatible>(
     cells: Grid<T>,
     x: number,
     y: number,
-    options: Options<T>,
+    options: SimulationOptions<T>,
+    font: Font,
     rect: Rect,
     effects: SimulationEffect<T>[],
     handle: SimulationHandle<T>,
@@ -406,7 +414,7 @@ function renderSingle<T extends CellCompatible>(
         effects[i].tweakCell(processed, handle);
     }
 
-    options.font.drawChar(
+    font.drawChar(
         ctx,
         processed.glyph,
         x - rect.x,
@@ -421,7 +429,8 @@ function renderAll<T extends CellCompatible>(
     dirty: Grid<boolean>,
     effectGrid: Grid<SimulationEffect<T>[]>,
     canvas: HTMLCanvasElement,
-    options: Options<T>,
+    options: SimulationOptions<T>,
+    font: Font,
     rect: Rect,
     handle: SimulationHandle<T>,
 ) {
@@ -432,7 +441,7 @@ function renderAll<T extends CellCompatible>(
         for (let x = rect.x; x < rect.x + rect.width; x++) {
             if (dirty.set(x, y, false)) {
                 const effects = effectGrid.get(x, y)!;
-                renderSingle(ctx, cells, x, y, options, rect, effects, handle);
+                renderSingle(ctx, cells, x, y, options, font, rect, effects, handle);
             }
         }
     }
@@ -443,7 +452,8 @@ function renderDirty<T extends CellCompatible>(
     dirty: Grid<boolean>,
     effectGrid: Grid<SimulationEffect<T>[]>,
     canvas: HTMLCanvasElement,
-    options: Options<T>,
+    options: SimulationOptions<T>,
+    font: Font,
     rect: Rect,
     handle: SimulationHandle<T>,
 ) {
@@ -456,7 +466,7 @@ function renderDirty<T extends CellCompatible>(
             const effects = effectGrid.get(x, y)!;
             dirty.set(x, y, false);
 
-            renderSingle(ctx, cells, x, y, options, rect, effects, handle);
+            renderSingle(ctx, cells, x, y, options, font, rect, effects, handle);
         }
     }
 }
