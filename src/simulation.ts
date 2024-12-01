@@ -94,17 +94,34 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
             if (effects) effects.length = 0;
         },
         tick() {
-            // Increment all effects before everything else
+            // Increment all effects
             for (const effect of effects) {
                 effect.nextTick();
             }
             for (let i = 0; i < effects.length; i++) {
                 if (effects[i].done()) {
+                    // PERF: swap_remove
                     effects.splice(i, 1);
                     i--;
                 }
             }
 
+            // Mark cells with effects as dirty and remove effects that are done
+            for (let y = cells.top; y < cells.top + cells.height; y++) {
+                for (let x = cells.left; x < cells.left + cells.width; x++) {
+                    const effects = effectGrid.get(x, y)!;
+                    if (effects.length > 0) dirty.set(x, y, true);
+                    for (let i = 0; i < effects.length; i++) {
+                        if (effects[i].done()) {
+                            // PERF: swap_remove
+                            effects.splice(i, 1);
+                            i--;
+                        }
+                    }
+                }
+            }
+
+            // Run onTick on the existing cells
             let onTick = options.onTick;
             if (onTick) {
                 for (let y = cells.top; y < cells.top + cells.height; y++) {
@@ -114,11 +131,13 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
                 }
             }
 
+            // Resize the simulation area if needed
             const newBounds = getSimulationBounds();
             if (!rectsEqual(newBounds, cells.getRect())) {
                 resize(newBounds);
             }
 
+            // Trigger the updates
             for (const [x, y, update] of actions) {
                 let prev = cells.get(x, y);
                 if (prev !== null) {
@@ -330,8 +349,8 @@ function renderDirty<T extends CellCompatible>(
 
     for (let y = rect.y; y < rect.y + rect.height; y++) {
         for (let x = rect.x; x < rect.x + rect.width; x++) {
+            if (!dirty.get(x, y)) continue;
             const effects = effectGrid.get(x, y)!;
-            if (!dirty.get(x, y) && !effects?.length) continue;
             dirty.set(x, y, false);
 
             renderSingle(ctx, cells, x, y, options, rect, effects, handle);
