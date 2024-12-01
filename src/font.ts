@@ -1,6 +1,11 @@
 import Base64 from "base64-js";
 import { type Color, colorToString } from "./color.js";
 
+/**
+ * An interface used to dictate how glyphs should be rendered on screen.
+ *
+ * This is notably implemented by `PixelFont`.
+ */
 export interface Font {
     charWidth(): number;
     charHeight(): number;
@@ -17,6 +22,11 @@ export interface Font {
 
 export type PixelFontHeightMode = "descender" | "height";
 
+/**
+ * A glyph renderer designed for pixel fonts.
+ *
+ * This uses the format of [Online Pixel Font Creator](https://github.com/adri326/online-pixel-font-creator).
+ */
 export class PixelFont implements Font {
     private canvases: Map<string, HTMLCanvasElement>;
     /// Base64-encoded values for the different glyphs

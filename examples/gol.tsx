@@ -2,8 +2,8 @@ import { render } from 'solid-js/web';
 import simulation from '../src/simulation.js';
 import { PixelFont } from '../src/font.js';
 import { PixelPerfectCanvas } from "@shadryx/pptk/solid";
-import classes from "./test.module.css";
-import { GOLSimulation } from '../simulations/gol.js';
+import classes from "./gol.module.css";
+import { GOLSimulation } from './gol-simulation.js';
 
 const Moxie6 = await fetch("./WaraleFont-Medium.pfs").then(res => res.text());
 

@@ -1,18 +1,27 @@
-/// An RGB(A) color in linear space.
+/** An RGB(A) color in linear space.
+ *
+ * If you are used to colors in sRGB space, consider using `colorFromHex` for defining colors.
+ */
 export type Color = Readonly<[r: number, g: number, b: number, a?: number]>;
 
 const EPSILON = 0.00001;
 
+/** Converts a single channel from sRGB space to linear space */
 function srgbToLinear(value: number): number {
     if (value > 0.04045) return Math.pow((value + 0.055) / 1.055, 2.4);
     else return value / 12.92;
 }
 
+/** Converts a single channel from linear space to sRGB space */
 function linearToSrgb(value: number): number {
+    if (value > 1.0) value = 1.0;
+    if (value < 0.0) value = 0.0;
+
     if (value > 0.0031308) return (1 + 0.055) * Math.pow(value, 1 / 2.4) - 0.055;
     else return value * 12.92;
 }
 
+/** Parses a hexadecimal color down into a `Color`. */
 export function colorFromHex(hex: string): Color {
     hex = hex.toLowerCase();
     if (!hex.startsWith("#")) return [0, 0, 0];
@@ -42,6 +51,7 @@ export function colorFromHex(hex: string): Color {
     }
 }
 
+/** Converts a color into a string to be passed to the canvas API. */
 export function colorToString(color: Color): string {
     const r = linearToSrgb(color[0]) * 255;
     const g = linearToSrgb(color[1]) * 255;
@@ -56,6 +66,9 @@ export function colorToString(color: Color): string {
     }
 }
 
+/** Mixes between `left` and `right` by `amount`. If `amount == 0.0`, then `left` is returned,
+ * and vice-versa.
+ */
 export function mixColor(left: Color, right: Color, amount: number): Color {
     const r = left[0] * (1.0 - amount) + right[0] * amount;
     const g = left[1] * (1.0 - amount) + right[1] * amount;

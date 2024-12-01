@@ -7,25 +7,55 @@ export type CellCompatible = number | boolean | object;
 export const SLEEP = Symbol("SLEEP");
 
 export type SimulationOptions<T extends CellCompatible> = {
+    /**
+     * What new or out-of-bounds cells should receive as initial state.
+     */
     defaultState: T,
+
+    /**
+     * Which glyph the given cell should be rendered with.
+     */
     getChar(state: T, x: number, y: number): string,
+
+    /**
+     * Which foreground color the given cell should be rendered with.
+     */
     getColor(state: T, x: number, y: number): Color,
+
+    /**
+     * Which background color the given cell should be rendered with.
+     */
     getBackground(state: T, x: number, y: number): Color,
+
+    /**
+     * Called at the very start of the simulation, to initialize cells.
+     * `onInit` may call destructive functions like `handle.set()`.
+     */
     onInit?(handle: SimulationHandle<T>): void,
+
+    /**
+     * Called for each cell at each tick.
+     * For the simulation to be consistent, it should not use destructive functions like `handle.set()`.
+     *
+     * If it returns `SLEEP`, then the cell will be marked as sleeping.
+     * If all cells in a block of cells are sleeping, then the block will not be processed,
+     * until an update within it is done.
+     */
     onTick?(state: T, x: number, y: number, handle: SimulationHandle<T>): void | typeof SLEEP,
 
-    /// How big the simulation is allowed to get.
+    /** How big the simulation is allowed to get. */
     simulationBounds?: Rect | (() => Rect),
 
-    /// If set, indicates how far a cell who is awake may affect other cells.
+    /** If set, indicates how far a cell who is awake may affect other cells.
+     * The potentially affected cells will continue to get processed.
+     */
     wakeRadius?: number,
 
-
-    /// Various debug options
+    /** Various debug options */
     debug?: {
-        /// If true, highlights in pink the cells that are asleep
+        /** If true, highlights in pink the cells that are asleep */
         sleep?: boolean,
-        /// If true, always renders every cell
+        /** If true, always renders every cell */
         alwaysRender?: boolean,
     },
 };
@@ -38,32 +68,36 @@ export type Rect = {
 };
 
 export type SimulationHandle<T extends CellCompatible> = Readonly<{
-    /// Immediately sets the cell's contents; do *not* use this during `onTick`.
+    /** Immediately sets the cell's contents; do *not* use this during `onTick`. */
     set(x: number, y: number, state: T): void;
 
-    /// Updates the cell's contents. This method is safe to use during `onTick`,
-    /// as long as it returns a new object
+    /** Updates the cell's contents. This method is safe to use during `onTick`,
+     * as long as it returns a new object.
+     */
     update(x: number, y: number, update: (prev: Readonly<T>) => T): void;
 
-    /// Registers the effect to be applied to the simulation render.
+    /** Registers the effect to be applied to the simulation render. */
     addEffect(effect: SimulationEffect<T>): void;
 
-    /// Clears all effects currently affecting the cell at `(x, y)`
+    /** Clears all effects currently affecting the cell at `(x, y)` */
     clearEffects(x: number, y: number): void;
 
-    /// Returns the current cell contents.
+    /** Returns the current cell contents. */
     get(x: number, y: number): T | null;
 
-    /// Runs a single simulation step
+    /** Returns the list of effects currently being applied to the given cell. */
+    getEffects(x: number, y: number): SimulationEffect<T>[];
+
+    /** Runs a single simulation step */
     tick(): void;
 
-    /// Renders the scene onto `canvas`.
+    /** Renders the scene onto `canvas`, which should implement the Canvas API. */
     render(canvas: HTMLCanvasElement, font: Font, rect?: Rect, rerender?: boolean): void;
 }>;
 
 const ASLEEP_RATIO: number = 8;
 
-export default function simulation<T extends CellCompatible>(options: SimulationOptions<T>) {
+export default function simulation<T extends CellCompatible>(options: SimulationOptions<T>): SimulationHandle<T> {
     function getSimulationBounds(): Rect {
         if (typeof options.simulationBounds === "function") return options.simulationBounds();
         else return options.simulationBounds ?? {
@@ -117,6 +151,9 @@ export default function simulation<T extends CellCompatible>(options: Simulation
         clearEffects(x: number, y: number) {
             const effects = effectGrid.get(x, y);
             if (effects) effects.length = 0;
+        },
+        getEffects(x: number, y: number) {
+            return effectGrid.get(x, y) ?? [];
         },
         tick() {
             // Increment all effects

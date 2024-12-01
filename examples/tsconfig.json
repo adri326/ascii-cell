@@ -14,13 +14,10 @@
         "strictFunctionTypes": true,
         "strictNullChecks": true,
         "exactOptionalPropertyTypes": true,
-        "declaration": true,
-        "declarationDir": "./dist",
-        "outDir": "dist/",
-        "rootDir": "src/"
+        "noEmit": true
     },
     "include": [
-        "src/**/*.ts",
-        "src/**/*.tsx",
+        "./**/*.ts",
+        "./**/*.tsx",
     ]
 }

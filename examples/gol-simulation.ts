@@ -51,10 +51,10 @@ export const GOLSimulation: SimulationOptions<State> = {
                 };
             });
             handle.addEffect(new FadeEffect(x, y, {
-                fg: [0.2, 0.2, 0.2],
+                fg: [0.5, 0.5, 0.5],
                 bg: [0.01, 0.01, 0.01],
                 length: 8,
-            }));
+            }, FadeEffect.QUADRATIC));
         } else if (!state.alive && neighbors === 3) {
             handle.update(x, y, (s) => {
                 if (s.char === ' ') return newCell();
