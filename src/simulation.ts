@@ -4,16 +4,30 @@ import { ProcessedCell, SimulationEffect } from "./effect.js";
 
 export type CellCompatible = number | boolean | object;
 
+export const SLEEP = Symbol("SLEEP");
+
 export type Options<T extends CellCompatible> = {
     defaultState: T,
     font: Font,
     getChar(state: T, x: number, y: number): string,
     getColor(state: T, x: number, y: number): Color,
     getBackground(state: T, x: number, y: number): Color,
-    onTick?(state: T, x: number, y: number, handle: SimulationHandle<T>): void,
+    onTick?(state: T, x: number, y: number, handle: SimulationHandle<T>): void | typeof SLEEP,
 
     /// How big the simulation is allowed to get.
     simulationBounds: Rect | (() => Rect),
+
+    /// If set, indicates how far a cell who is awake may affect other cells.
+    wakeRadius?: number,
+
+
+    /// Various debug options
+    debug?: {
+        /// If true, highlights in pink the cells that are asleep
+        sleep?: boolean,
+        /// If true, always renders every cell
+        alwaysRender?: boolean,
+    },
 };
 
 export type Rect = {
@@ -47,15 +61,20 @@ export type SimulationHandle<T extends CellCompatible> = Readonly<{
     render(canvas: HTMLCanvasElement, rect?: Rect, rerender?: boolean): void;
 }>;
 
+const ASLEEP_RATIO: number = 8;
+
 export default function simulation<T extends CellCompatible>(options: Options<T>) {
     function getSimulationBounds(): Rect {
         if (typeof options.simulationBounds === "function") return options.simulationBounds();
         else return options.simulationBounds;
     }
 
+    const onTick: Exclude<Options<T>["onTick"], undefined> = options.onTick ?? (() => {});
+
     let cells = new Grid(getSimulationBounds(), options.defaultState);
     let dirty = new Grid<boolean>(getSimulationBounds(), true);
     let effectGrid = new Grid<SimulationEffect<T>[]>(getSimulationBounds(), () => []);
+    let asleep = new Grid<boolean>(divideRect(getSimulationBounds(), ASLEEP_RATIO), false);
     const effects: SimulationEffect<T>[] = [];
     const actions: [x: number, y: number, callback: (prev: Readonly<T>) => T][] = [];
 
@@ -66,6 +85,7 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
         cells = new Grid(newBounds, cells, options.defaultState);
         dirty = new Grid(newBounds, dirty, true);
         effectGrid = new Grid(newBounds, effectGrid, () => []);
+        asleep = new Grid(divideRect(newBounds, ASLEEP_RATIO), asleep, false);
     }
 
     const res = {
@@ -106,30 +126,24 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
                 }
             }
 
-            // Mark cells with effects as dirty and remove effects that are done
-            for (let y = cells.top; y < cells.top + cells.height; y++) {
-                for (let x = cells.left; x < cells.left + cells.width; x++) {
-                    const effects = effectGrid.get(x, y)!;
-                    if (effects.length > 0) dirty.set(x, y, true);
-                    for (let i = 0; i < effects.length; i++) {
-                        if (effects[i].done()) {
-                            // PERF: swap_remove
-                            effects.splice(i, 1);
-                            i--;
-                        }
+            iterAwake(effectGrid, asleep, ASLEEP_RATIO, (effects, x, y) => {
+                let stayAwake = effects.length > 0;
+                // Mark cells with effects as dirty and remove effects that are done
+                if (effects.length > 0) dirty.set(x, y, true);
+                for (let i = 0; i < effects.length; i++) {
+                    if (effects[i].done()) {
+                        // PERF: swap_remove
+                        effects.splice(i, 1);
+                        i--;
                     }
                 }
-            }
 
-            // Run onTick on the existing cells
-            let onTick = options.onTick;
-            if (onTick) {
-                for (let y = cells.top; y < cells.top + cells.height; y++) {
-                    for (let x = cells.left; x < cells.left + cells.width; x++) {
-                        onTick(cells.get(x, y)!, x, y, res);
-                    }
-                }
-            }
+                // Run onTick on the existing cells
+                const sleep = onTick(cells.get(x, y)!, x, y, res);
+                if (sleep !== SLEEP) stayAwake = true;
+
+                return stayAwake;
+            }, options.wakeRadius ?? 0, true);
 
             // Resize the simulation area if needed
             const newBounds = getSimulationBounds();
@@ -143,6 +157,7 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
                 if (prev !== null) {
                     cells.set(x, y, update(prev));
                     dirty.set(x, y, true);
+                    asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
                 }
             }
 
@@ -160,10 +175,30 @@ export default function simulation<T extends CellCompatible>(options: Options<T>
                 rerender = true;
             }
 
-            if (rerender) {
+            if (rerender || options.debug?.alwaysRender) {
                 renderAll(cells, dirty, effectGrid, canvas, options, rect, res);
             } else {
                 renderDirty(cells, dirty, effectGrid, canvas, options, rect, res);
+            }
+
+            if (options.debug?.sleep) {
+                const ctx = canvas.getContext("2d")!;
+                for (let gy = asleep.top; gy < asleep.top + asleep.height; gy++) {
+                    for (let gx = asleep.left; gx < asleep.left + asleep.width; gx++) {
+                        ctx.globalCompositeOperation = "source-over";
+                        if (asleep.get(gx, gy)) {
+                            ctx.fillStyle = "rgba(200, 100, 160, 0.2)";
+                        } else {
+                            ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
+                        }
+                        ctx.fillRect(
+                            (gx * ASLEEP_RATIO - rect.x) * options.font.charWidth(),
+                            (gy * ASLEEP_RATIO - rect.y) * options.font.charHeight(),
+                            ASLEEP_RATIO * options.font.charWidth(),
+                            ASLEEP_RATIO * options.font.charHeight()
+                        );
+                    }
+                }
             }
         }
     } satisfies SimulationHandle<T>;
@@ -270,6 +305,74 @@ function rectsEqual(left: Rect | null | undefined, right: Rect) {
         && left.width === right.width
         && left.height === right.height
     );
+}
+
+function divideRect(rect: Rect, by: number): Rect {
+    return {
+        x: Math.floor(rect.x / by),
+        y: Math.floor(rect.y / by),
+        width: Math.ceil(rect.width / by),
+        height: Math.ceil(rect.height / by),
+    };
+}
+
+function iterAwake<T extends CellCompatible>(
+    cells: Grid<T>,
+    asleep: Grid<boolean>,
+    asleep_ratio: number,
+    callback: (cell: T, x: number, y: number) => void | boolean,
+    wakeRadius: number = 0,
+    resetAsleep: boolean = false,
+) {
+    const awakeMetacells: Set<number> = new Set();
+    const wakeMetaradius = Math.ceil(wakeRadius / asleep_ratio);
+    function wakeAt(x: number, y: number) {
+        const gx = Math.floor(x / asleep_ratio);
+        const gy = Math.floor(y / asleep_ratio);
+        if (
+            gx < asleep.left
+            || gx >= asleep.left + asleep.width
+            || gy < asleep.top
+            || gy >= asleep.top + asleep.height
+        ) return;
+
+        awakeMetacells.add((gx - asleep.left) + (gy - asleep.top) * asleep.width);
+    }
+
+    for (let gy = asleep.top; gy < asleep.top + asleep.height; gy++) {
+        for (let gx = asleep.left; gx < asleep.left + asleep.width; gx++) {
+            if (asleep.get(gx, gy)) continue;
+            if (resetAsleep) {
+                asleep.set(gx, gy, true);
+            }
+
+            for (let dy = 0; dy < asleep_ratio; dy++) {
+                const y = gy * asleep_ratio + dy;
+                if (y < cells.top || y >= cells.top + cells.height) continue;
+
+                for (let dx = 0; dx < asleep_ratio; dx++) {
+                    const x = gx * asleep_ratio + dx;
+                    const cell = cells.get(x, y);
+                    if (cell === null) continue;
+
+                    if (callback(cell, x, y)) {
+                        wakeAt(x, y);
+                    }
+                }
+            }
+        }
+    }
+
+    for (const index of awakeMetacells) {
+        const x = (index % asleep.width) + asleep.left;
+        const y = Math.floor(index / asleep.width) + asleep.top;
+
+        for (let gy = y - wakeMetaradius; gy <= y + wakeMetaradius; gy++) {
+            for (let gx = x - wakeMetaradius; gx <= x + wakeMetaradius; gx++) {
+                asleep.set(gx, gy, false);
+            }
+        }
+    }
 }
 
 /// Requires that `(x, y)` be in bounds of `cells`

@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onMount } from 'solid-js';
 import { render } from 'solid-js/web';
-import simulation from '../src/simulation.js';
+import simulation, { SLEEP } from '../src/simulation.js';
 import { PixelFont } from '../src/font.js';
 import { PixelPerfectCanvas } from "@shadryx/pptk/solid";
 import classes from "./test.module.css";
@@ -36,6 +36,7 @@ function App() {
             char: " ",
         },
         font,
+        wakeRadius: 1,
         getChar(state) {
             return state.char;
         },
@@ -73,6 +74,8 @@ function App() {
                 });
                 handle.clearEffects(x, y);
             }
+
+            if (!state.alive && neighbors === 0) return SLEEP;
         },
         simulationBounds: () => {
             let bounds = getBounds();
@@ -82,7 +85,11 @@ function App() {
                 width: bounds.width + 40,
                 height: bounds.height + 40,
             };
-        }
+        },
+        // debug: {
+        //     sleep: true,
+        //     alwaysRender: true,
+        // }
     });
 
     function newCell(): State {
