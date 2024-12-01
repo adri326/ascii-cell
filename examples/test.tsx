@@ -44,7 +44,7 @@ function App() {
             return state.alive ? [0.008, 0.008, 0.008] : [0.02, 0.02, 0.02];
         },
         getBackground(state) {
-            return state.alive ? [0.8, 0.8, 0.8] : [0.0, 0.0, 0.0];
+            return state.alive ? [0.8, 0.8, 0.8] : [0.0, 0.0, 0.0, 0.0];
         },
         onTick(state, x, y, handle) {
             let neighbors = 0;

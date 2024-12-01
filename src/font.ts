@@ -107,16 +107,41 @@ export class PixelFont implements Font {
         const sx = x * this.width;
         const sy = y * this.height;
 
-        ctx.clearRect(sx, sy, this.width, this.height);
-        ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = colorToString(bg);
-        ctx.fillRect(sx, sy, this.width, this.height);
-        ctx.globalCompositeOperation = "destination-out";
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(glyphCanvas, sx, sy);
-        ctx.globalCompositeOperation = "destination-over";
-        ctx.fillStyle = colorToString(fg);
-        ctx.fillRect(sx, sy, this.width, this.height);
+        if (glyph === " ") {
+            if (bg[3] ?? 1.0) {
+                ctx.globalCompositeOperation = "source-over";
+                ctx.fillStyle = colorToString(bg);
+                ctx.fillRect(sx, sy, this.width, this.height);
+            }
+        } else if (glyph === "\u{2588}") {
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = colorToString(fg);
+            ctx.fillRect(sx, sy, this.width, this.height);
+        } else {
+            ctx.clearRect(sx, sy, this.width, this.height);
+            ctx.imageSmoothingEnabled = false;
+            if (bg[3] ?? 1.0) {
+                // Fill in the background
+                ctx.globalCompositeOperation = "source-over";
+                ctx.fillStyle = colorToString(bg);
+                ctx.fillRect(sx, sy, this.width, this.height);
+                // Poke the glyph out
+                ctx.globalCompositeOperation = "destination-out";
+                ctx.drawImage(glyphCanvas, sx, sy);
+                // Put the foreground behind the glyph
+                ctx.globalCompositeOperation = "destination-over";
+                ctx.fillStyle = colorToString(fg);
+                ctx.fillRect(sx, sy, this.width, this.height);
+            } else {
+                // No background, so we directly draw the glyph
+                ctx.globalCompositeOperation = "source-over";
+                ctx.drawImage(glyphCanvas, sx, sy);
+                // Multiply it with the foreground color
+                ctx.globalCompositeOperation = "source-atop";
+                ctx.fillStyle = colorToString(fg);
+                ctx.fillRect(sx, sy, this.width, this.height);
+            }
+        }
     }
 }
 
