@@ -39,9 +39,9 @@ export function colorFromHex(hex: string): Color {
                 digit => srgbToLinear(Number.parseInt(digit, 16) / 15)
             ) as readonly number[] as Color;
     } else if (hex.length === 7 || hex.length === 9) {
-        let r = srgbToLinear(Number.parseInt(hex.slice(1, 3)) / 255);
-        let g = srgbToLinear(Number.parseInt(hex.slice(3, 5)) / 255);
-        let b = srgbToLinear(Number.parseInt(hex.slice(5, 7)) / 255);
+        let r = srgbToLinear(Number.parseInt(hex.slice(1, 3), 16) / 255);
+        let g = srgbToLinear(Number.parseInt(hex.slice(3, 5), 16) / 255);
+        let b = srgbToLinear(Number.parseInt(hex.slice(5, 7), 16) / 255);
         if (hex.length === 7) return [r, g, b];
 
         let a = Number.parseInt(hex.slice(7, 9)) / 255;
@@ -75,9 +75,9 @@ export function mixColor(left: Color, right: Color, amount: number): Color {
     const b = left[2] * (1.0 - amount) + right[2] * amount;
     const a = (left[3] ?? 1.0) * (1.0 - amount) + (right[3] ?? 1.0) * amount;
 
-    if (left[3] ?? 1.0 <= EPSILON) {
+    if ((left[3] ?? 1.0) <= EPSILON) {
         return [right[0], right[1], right[2], a];
-    } else if (right[3] ?? 1.0 <= EPSILON) {
+    } else if ((right[3] ?? 1.0) <= EPSILON) {
         return [left[0], left[1], left[2], a];
     }
 

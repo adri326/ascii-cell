@@ -46,10 +46,27 @@ export type SimulationOptions<T extends CellCompatible> = {
     /** How big the simulation is allowed to get. */
     simulationBounds?: Rect | (() => Rect),
 
-    /** If set, indicates how far a cell who is awake may affect other cells.
-     * The potentially affected cells will continue to get processed.
-     */
-    wakeRadius?: number,
+    /**
+     * Options related to improving the simulation's performances.
+    */
+    performance?: {
+        /** If set, indicates how far a cell who is awake may affect other cells.
+         * The potentially affected cells will continue to get processed.
+         *
+         * Only has an effect if cells can become asleep.
+         */
+        wakeRadius?: number,
+
+        /**
+         * Indicates whether or not the initial state should be rendered on screen when first spawned in.
+         */
+        initialStateIsClean?: boolean,
+
+        /**
+         * Indicates whether or not cells spawned in with the initial state can immediately become asleep.
+         */
+        initialStateSleep?: boolean,
+    },
 
     /** Various debug options */
     debug?: {
@@ -109,11 +126,13 @@ export default function simulation<T extends CellCompatible>(options: Simulation
     }
 
     const onTick: Exclude<SimulationOptions<T>["onTick"], undefined> = options.onTick ?? (() => {});
+    const initialDirty = !options.performance?.initialStateIsClean;
+    const initialSleep = options.performance?.initialStateSleep ?? false;
 
     let cells = new Grid(getSimulationBounds(), options.defaultState);
-    let dirty = new Grid<boolean>(getSimulationBounds(), true);
+    let dirty = new Grid<boolean>(getSimulationBounds(), initialDirty);
     let effectGrid = new Grid<SimulationEffect<T>[]>(getSimulationBounds(), () => []);
-    let asleep = new Grid<boolean>(divideRect(getSimulationBounds(), ASLEEP_RATIO), false);
+    let asleep = new Grid<boolean>(divideRect(getSimulationBounds(), ASLEEP_RATIO), initialSleep);
     const effects: SimulationEffect<T>[] = [];
     const actions: [x: number, y: number, callback: (prev: Readonly<T>) => T][] = [];
 
@@ -122,17 +141,18 @@ export default function simulation<T extends CellCompatible>(options: Simulation
 
     function resize(newBounds: Rect) {
         cells = new Grid(newBounds, cells, options.defaultState);
-        dirty = new Grid(newBounds, dirty, true);
+        dirty = new Grid(newBounds, dirty, initialDirty);
         effectGrid = new Grid(newBounds, effectGrid, () => []);
-        asleep = new Grid(divideRect(newBounds, ASLEEP_RATIO), asleep, false);
+        asleep = new Grid(divideRect(newBounds, ASLEEP_RATIO), asleep, initialSleep);
     }
 
     const res = {
         set(x: number, y: number, state: T) {
             if (!cells.set(x, y, state)) {
-                throw new Error("resizing not yet implemented");
+                console.warn(`Could not set cell at (${x}, ${y}): out of (current) bounds.`);
             }
             dirty.set(x, y, true);
+            asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
         },
         get(x: number, y: number): T {
             return cells.get(x, y) ?? options.defaultState;
@@ -146,6 +166,7 @@ export default function simulation<T extends CellCompatible>(options: Simulation
             effects.push(effect);
             for (const [x, y] of effect.affectedCells()) {
                 effectGrid.get(x, y)?.push(effect);
+                asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
             }
         },
         clearEffects(x: number, y: number) {
@@ -185,7 +206,7 @@ export default function simulation<T extends CellCompatible>(options: Simulation
                 if (sleep !== SLEEP) stayAwake = true;
 
                 return stayAwake;
-            }, options.wakeRadius ?? 0, true);
+            }, options.performance?.wakeRadius ?? 0, true);
 
             // Resize the simulation area if needed
             const newBounds = getSimulationBounds();
@@ -208,16 +229,18 @@ export default function simulation<T extends CellCompatible>(options: Simulation
         render(canvas: HTMLCanvasElement, font: Font, rectOpt?: Rect, _rerender?: boolean) {
             let rerender = _rerender ?? false;
             const rect = rectOpt ?? cells.getRect();
-            if (canvas !== previousCanvas) {
-                previousCanvas = canvas;
-                rerender = true;
-            }
             if (!rectsEqual(previousRect, rect)) {
                 previousRect = rect;
-                rerender = true;
+                // Only trigger a redraw on subsequent draws
+                if (previousCanvas !== null) rerender = true;
+            }
+            if (canvas !== previousCanvas) {
+                if (previousCanvas !== null) rerender = true;
+                previousCanvas = canvas;
             }
 
             if (rerender || options.debug?.alwaysRender) {
+                performance.mark("Rerender");
                 renderAll(cells, dirty, effectGrid, canvas, options, font, rect, res);
             } else {
                 renderDirty(cells, dirty, effectGrid, canvas, options, font, rect, res);
@@ -497,13 +520,18 @@ function renderDirty<T extends CellCompatible>(
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Could not get 2D context");
 
+    let rendered = 0;
+
     for (let y = rect.y; y < rect.y + rect.height; y++) {
         for (let x = rect.x; x < rect.x + rect.width; x++) {
             if (!dirty.get(x, y)) continue;
+            rendered += 1;
             const effects = effectGrid.get(x, y)!;
             dirty.set(x, y, false);
 
             renderSingle(ctx, cells, x, y, options, font, rect, effects, handle);
         }
     }
+
+    performance.mark(`Rendered: ${rendered}`);
 }

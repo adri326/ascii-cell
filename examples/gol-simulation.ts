@@ -15,7 +15,9 @@ export const GOLSimulation: SimulationOptions<State> = {
         alive: false,
         char: " ",
     },
-    wakeRadius: 1,
+    performance: {
+        wakeRadius: 1,
+    },
     getChar(state) {
         return state.char;
     },
