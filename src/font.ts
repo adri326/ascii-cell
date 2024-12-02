@@ -76,6 +76,36 @@ export class PixelFont implements Font {
         return this.height;
     }
 
+    prepareGlyph(glyph: string): HTMLCanvasElement | undefined {
+        const pixels = this.pixels.get(glyph);
+        if (!pixels) {
+            console.error(`Undefined glyph: '${glyph}'`);
+            return undefined;
+        }
+
+        const glyphCanvas = document.createElement("canvas");
+        glyphCanvas.width = this.width;
+        glyphCanvas.height = this.height;
+        const glyphCtx = glyphCanvas.getContext("2d");
+        if (!glyphCtx) throw new Error("Could not get 2D context for glyph");
+        glyphCtx.fillStyle = "white";
+
+        const buffer = Base64.toByteArray(pixels);
+        for (let y = 0; y < this.height; y++) {
+            for (let x = 0; x < this.width; x++) {
+                let index = x + (y + this.yOffset) * this.width;
+                let pixel = (buffer[Math.floor(index / 8)] >> (7 - index % 8)) & 0b1;
+
+                if (!pixel) continue;
+
+                glyphCtx.fillRect(x, y, 1, 1);
+            }
+        }
+
+        this.canvases.set(glyph, glyphCanvas);
+        return glyphCanvas;
+    }
+
     drawChar(
         ctx: CanvasRenderingContext2D,
         glyph: string,
@@ -86,32 +116,8 @@ export class PixelFont implements Font {
     ): void {
         let glyphCanvas = this.canvases.get(glyph);
         if (!glyphCanvas) {
-            const pixels = this.pixels.get(glyph);
-            if (!pixels) {
-                console.error(`Undefined glyph: '${glyph}'`);
-                return;
-            }
-
-            glyphCanvas = document.createElement("canvas");
-            const glyphCtx = glyphCanvas.getContext("2d");
-            if (!glyphCtx) throw new Error("Could not get 2D context for glyph");
-            glyphCtx.fillStyle = "white";
-            glyphCanvas.width = this.width;
-            glyphCanvas.height = this.height;
-
-            const buffer = Base64.toByteArray(pixels);
-            for (let y = 0; y < this.height; y++) {
-                for (let x = 0; x < this.width; x++) {
-                    let index = x + (y + this.yOffset) * this.width;
-                    let pixel = (buffer[Math.floor(index / 8)] >> (7 - index % 8)) & 0b1;
-
-                    if (!pixel) continue;
-
-                    glyphCtx.fillRect(x, y, 1, 1);
-                }
-            }
-
-            this.canvases.set(glyph, glyphCanvas);
+            glyphCanvas = this.prepareGlyph(glyph);
+            if (!glyphCanvas) return;
         }
 
         const sx = x * this.width;
