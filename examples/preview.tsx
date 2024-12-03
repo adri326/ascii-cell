@@ -1,14 +1,17 @@
 import { render } from 'solid-js/web';
 import { PixelFont } from '../src/font.js';
 import { PixelPerfectCanvas } from "@shadryx/pptk/solid";
-import classes from "./gol.module.css";
-import { GOLSimulation } from './gol-simulation.js';
+import classes from "./preview.module.css";
 import Simulation from '../src/simulation.js';
 
-const Moxie6 = await fetch("./WaraleFont-Medium.pfs").then(res => res.text());
+// If you wish to put your WIP simulation in a different file,
+// simply change the line below so that it matches with its name.
+import { GOLSimulation as SimDefinition } from './gol-simulation.js';
+
+const Font = await fetch("./WaraleFont-Medium.pfs").then(res => res.text());
 
 function App() {
-    const font = new PixelFont(Moxie6);
+    const font = new PixelFont(Font);
     let canvas: HTMLCanvasElement | null = null;
 
     function getBounds() {
@@ -21,7 +24,7 @@ function App() {
     }
 
     const sim = new Simulation({
-        ...GOLSimulation,
+        ...SimDefinition,
         simulationBounds: () => {
             let bounds = getBounds();
             return {

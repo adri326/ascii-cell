@@ -108,6 +108,8 @@ export class Simulation<T extends CellCompatible> {
 
     private _previousCanvas: HTMLCanvasElement | null;
     private _previousRect: Rect | null;
+    /** Skips the rendering logic if no changes were made anywhere */
+    private _globalDirty: boolean;
 
     /** The actual cell states */
     protected cells: Grid<T>;
@@ -144,6 +146,7 @@ export class Simulation<T extends CellCompatible> {
 
         this._previousCanvas = null;
         this._previousRect = null;
+        this._globalDirty = this._initialDirty;
 
         this.currentTick = 0;
 
@@ -159,6 +162,7 @@ export class Simulation<T extends CellCompatible> {
         this.dirty = new Grid(newBounds, this.dirty, this._initialDirty);
         this.effectGrid = new Grid(newBounds, this.effectGrid, () => []);
         this.asleep = new Grid(divideRect(newBounds, ASLEEP_RATIO), this.asleep, this._initialSleepy);
+        this._globalDirty = true;
     }
 
     public set(x: number, y: number, state: T) {
@@ -167,6 +171,7 @@ export class Simulation<T extends CellCompatible> {
         }
         this.dirty.set(x, y, true);
         this.asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
+        this._globalDirty = true;
     }
 
     public get(x: number, y: number): T {
@@ -185,11 +190,15 @@ export class Simulation<T extends CellCompatible> {
             this.effectGrid.get(x, y)?.push(effect);
             this.asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
         }
+
+        this._globalDirty = true;
     }
 
     public clearEffects(x: number, y: number) {
         const effects = this.effectGrid.get(x, y);
         if (effects) effects.length = 0;
+
+        this._globalDirty = true;
     }
 
     public getEffects(x: number, y: number): readonly SimulationEffect<T>[] {
@@ -197,6 +206,8 @@ export class Simulation<T extends CellCompatible> {
     }
 
     public tick() {
+        this._globalDirty = true;
+
         // Increment all effects
         for (const effect of this.effects) {
             effect.nextTick();
@@ -260,23 +271,28 @@ export class Simulation<T extends CellCompatible> {
             this._previousCanvas = canvas;
             this._previousRect = rect;
             this.renderDirty(canvas, font, rect);
-        } else {
-            let rerender = _rerender ?? false;
-            if (!rectsEqual(this._previousRect, rect)) {
-                this._previousRect = rect;
-                rerender = true;
-            }
-            if (canvas !== this._previousCanvas) {
-                rerender = true;
-                this._previousCanvas = canvas;
-            }
 
-            if (rerender || this.options.debug?.alwaysRender) {
-                if (this.options.debug?.logPerformance) performance.mark("[ascii-cell] Rerender");
-                this.renderAll(canvas, font, rect);
-            } else {
-                this.renderDirty(canvas, font, rect);
+            if (this.options.debug?.sleep) {
+                this.debugSleep(canvas, font, rect);
             }
+            return;
+        }
+
+        let rerender = _rerender ?? false;
+        if (!rectsEqual(this._previousRect, rect)) {
+            this._previousRect = rect;
+            rerender = true;
+        }
+        if (canvas !== this._previousCanvas) {
+            rerender = true;
+            this._previousCanvas = canvas;
+        }
+
+        if (rerender || this.options.debug?.alwaysRender) {
+            if (this.options.debug?.logPerformance) performance.mark("[ascii-cell] Rerender");
+            this.renderAll(canvas, font, rect);
+        } else if (this._globalDirty) {
+            this.renderDirty(canvas, font, rect);
         }
 
         if (this.options.debug?.sleep) {
@@ -330,6 +346,7 @@ export class Simulation<T extends CellCompatible> {
         }
 
         if (this.options.debug?.logPerformance) performance.mark(`Rendered: ${rendered}`);
+        this._globalDirty = false;
     }
 
 
@@ -388,6 +405,7 @@ export class Simulation<T extends CellCompatible> {
                 }
             }
         }
+        this._globalDirty = false;
     }
 }
 export default Simulation;

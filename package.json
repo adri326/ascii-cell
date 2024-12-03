@@ -2,7 +2,6 @@
   "name": "ascii-cell",
   "version": "0.1.0",
   "description": "A frontend library for making cellular automatons, rendered as ASCII art!",
-  "main": "index.js",
   "repository": "https://github.com/adri326/ascii-cell/",
   "author": "Shad Amethyst",
   "license": "MIT",
@@ -14,7 +13,13 @@
   "files": [
     "dist"
   ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./simulation": {
       "types": "./dist/simulation.d.ts",
       "default": "./dist/simulation.js"
@@ -30,6 +35,10 @@
     "./color": {
       "types": "./dist/color.d.ts",
       "default": "./dist/color.js"
+    },
+    "./wire": {
+      "types": "./dist/wire.d.ts",
+      "default": "./dist/wire.js"
     }
   },
   "dependencies": {
