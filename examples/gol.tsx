@@ -1,9 +1,9 @@
 import { render } from 'solid-js/web';
-import simulation from '../src/simulation.js';
 import { PixelFont } from '../src/font.js';
 import { PixelPerfectCanvas } from "@shadryx/pptk/solid";
 import classes from "./gol.module.css";
 import { GOLSimulation } from './gol-simulation.js';
+import Simulation from '../src/simulation.js';
 
 const Moxie6 = await fetch("./WaraleFont-Medium.pfs").then(res => res.text());
 
@@ -20,7 +20,7 @@ function App() {
         }
     }
 
-    const sim = simulation({
+    const sim = new Simulation({
         ...GOLSimulation,
         simulationBounds: () => {
             let bounds = getBounds();

@@ -31,7 +31,7 @@ export type SimulationOptions<T extends CellCompatible> = {
      * Called at the very start of the simulation, to initialize cells.
      * `onInit` may call destructive functions like `handle.set()`.
      */
-    onInit?(handle: SimulationHandle<T>): void,
+    onInit?(handle: Simulation<T>): void,
 
     /**
      * Called for each cell at each tick.
@@ -41,7 +41,7 @@ export type SimulationOptions<T extends CellCompatible> = {
      * If all cells in a block of cells are sleeping, then the block will not be processed,
      * until an update within it is done.
      */
-    onTick?(state: T, x: number, y: number, handle: SimulationHandle<T>): void | typeof SLEEP,
+    onTick?(state: T, x: number, y: number, handle: Simulation<T>): void | typeof SLEEP,
 
     /** How big the simulation is allowed to get. */
     simulationBounds?: Rect | (() => Rect),
@@ -74,6 +74,8 @@ export type SimulationOptions<T extends CellCompatible> = {
         sleep?: boolean,
         /** If true, always renders every cell */
         alwaysRender?: boolean,
+        /** If true, logs performance metrics */
+        logPerformance?: boolean,
     },
 };
 
@@ -84,194 +86,311 @@ export type Rect = {
     height: number
 };
 
-export type SimulationHandle<T extends CellCompatible> = Readonly<{
-    /** Immediately sets the cell's contents; do *not* use this during `onTick`. */
-    set(x: number, y: number, state: T): void;
-
-    /** Updates the cell's contents. This method is safe to use during `onTick`,
-     * as long as it returns a new object.
-     */
-    update(x: number, y: number, update: (prev: Readonly<T>) => T): void;
-
-    /** Registers the effect to be applied to the simulation render. */
-    addEffect(effect: SimulationEffect<T>): void;
-
-    /** Clears all effects currently affecting the cell at `(x, y)` */
-    clearEffects(x: number, y: number): void;
-
-    /** Returns the current cell contents. */
-    get(x: number, y: number): T | null;
-
-    /** Returns the list of effects currently being applied to the given cell. */
-    getEffects(x: number, y: number): SimulationEffect<T>[];
-
-    /** Runs a single simulation step */
-    tick(): void;
-
-    /** Renders the scene onto `canvas`, which should implement the Canvas API. */
-    render(canvas: HTMLCanvasElement, font: Font, rect?: Rect, rerender?: boolean): void;
-}>;
-
 const ASLEEP_RATIO: number = 8;
 
-export default function simulation<T extends CellCompatible>(options: SimulationOptions<T>): SimulationHandle<T> {
-    function getSimulationBounds(): Rect {
-        if (typeof options.simulationBounds === "function") return options.simulationBounds();
-        else return options.simulationBounds ?? {
-            x: 0,
-            y: 0,
-            width: 8,
-            height: 8
-        };
+function getSimulationBounds(bounds: SimulationOptions<CellCompatible>["simulationBounds"]): Rect {
+    if (typeof bounds === "function") return bounds();
+    else return bounds ?? {
+        x: 0,
+        y: 0,
+        width: 8,
+        height: 8
+    };
+}
+
+export class Simulation<T extends CellCompatible> {
+    protected readonly options: Readonly<SimulationOptions<T>>;
+
+    private _onTick: Exclude<SimulationOptions<T>["onTick"], undefined>;
+    private _initialDirty: boolean;
+    private _initialSleepy: boolean;
+    private _defaultState: T;
+
+    private _previousCanvas: HTMLCanvasElement | null;
+    private _previousRect: Rect | null;
+
+    /** The actual cell states */
+    protected cells: Grid<T>;
+    /** Whether or not the given cells need to be re-renredered */
+    protected dirty: Grid<boolean>;
+    /** The current visual effects for each cell */
+    protected effectGrid: Grid<SimulationEffect<T>[]>;
+    /** A grid with a lower resolution, indicating whether the grouped cells are all asleep or not.
+     * This notably helps simulations where many cells are empty and do nothing.
+     */
+    protected asleep: Grid<boolean>;
+    /** All current effects, used for housekeeping */
+    protected effects: SimulationEffect<T>[];
+    /** The current unresolved actions; these are queued by the `update` method, when called with `onTick` */
+    protected actions: [x: number, y: number, callback: (prev: Readonly<T>) => T][];
+
+    protected currentTick: number;
+
+    constructor(options: SimulationOptions<T>) {
+        this.options = options;
+        this._defaultState = options.defaultState;
+        this._onTick = options.onTick ?? (() => {});
+        this._initialDirty = !options.performance?.initialStateIsClean;
+        this._initialSleepy = options.performance?.initialStateSleep ?? false;
+
+        const bounds = getSimulationBounds(options.simulationBounds);
+        this.cells = new Grid(bounds, this._defaultState);
+        this.dirty = new Grid<boolean>(bounds, this._initialDirty);
+        this.effectGrid = new Grid<SimulationEffect<T>[]>(bounds, () => []);
+        this.asleep = new Grid<boolean>(divideRect(bounds, ASLEEP_RATIO), this._initialSleepy);
+
+        this.effects = [];
+        this.actions = [];
+
+        this._previousCanvas = null;
+        this._previousRect = null;
+
+        this.currentTick = 0;
+
+        options.onInit?.(this);
     }
 
-    const onTick: Exclude<SimulationOptions<T>["onTick"], undefined> = options.onTick ?? (() => {});
-    const initialDirty = !options.performance?.initialStateIsClean;
-    const initialSleep = options.performance?.initialStateSleep ?? false;
-
-    let cells = new Grid(getSimulationBounds(), options.defaultState);
-    let dirty = new Grid<boolean>(getSimulationBounds(), initialDirty);
-    let effectGrid = new Grid<SimulationEffect<T>[]>(getSimulationBounds(), () => []);
-    let asleep = new Grid<boolean>(divideRect(getSimulationBounds(), ASLEEP_RATIO), initialSleep);
-    const effects: SimulationEffect<T>[] = [];
-    const actions: [x: number, y: number, callback: (prev: Readonly<T>) => T][] = [];
-
-    let previousCanvas: HTMLCanvasElement | null = null;
-    let previousRect: Rect | null = null;
-
-    function resize(newBounds: Rect) {
-        cells = new Grid(newBounds, cells, options.defaultState);
-        dirty = new Grid(newBounds, dirty, initialDirty);
-        effectGrid = new Grid(newBounds, effectGrid, () => []);
-        asleep = new Grid(divideRect(newBounds, ASLEEP_RATIO), asleep, initialSleep);
+    public downcast(): Simulation<CellCompatible> {
+        return this as Simulation<CellCompatible>;
     }
 
-    const res = {
-        set(x: number, y: number, state: T) {
-            if (!cells.set(x, y, state)) {
-                console.warn(`Could not set cell at (${x}, ${y}): out of (current) bounds.`);
-            }
-            dirty.set(x, y, true);
-            asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
-        },
-        get(x: number, y: number): T {
-            return cells.get(x, y) ?? options.defaultState;
-        },
-        update(x: number, y: number, callback: (prev: Readonly<T>) => T) {
-            actions.push([x, y, callback]);
-        },
-        addEffect(effect: SimulationEffect<T>) {
-            if (effect.done()) return;
+    private resize(newBounds: Rect) {
+        this.cells = new Grid(newBounds, this.cells, this._defaultState);
+        this.dirty = new Grid(newBounds, this.dirty, this._initialDirty);
+        this.effectGrid = new Grid(newBounds, this.effectGrid, () => []);
+        this.asleep = new Grid(divideRect(newBounds, ASLEEP_RATIO), this.asleep, this._initialSleepy);
+    }
 
-            effects.push(effect);
-            for (const [x, y] of effect.affectedCells()) {
-                effectGrid.get(x, y)?.push(effect);
-                asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
+    public set(x: number, y: number, state: T) {
+        if (!this.cells.set(x, y, state)) {
+            console.warn(`Could not set cell at (${x}, ${y}): out of (current) bounds.`);
+        }
+        this.dirty.set(x, y, true);
+        this.asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
+    }
+
+    public get(x: number, y: number): T {
+        return this.cells.get(x, y) ?? this.options.defaultState;
+    }
+
+    public update(x: number, y: number, callback: (prev: Readonly<T>) => T) {
+        this.actions.push([x, y, callback]);
+    }
+
+    public addEffect(effect: SimulationEffect<T>) {
+        if (effect.done()) return;
+
+        this.effects.push(effect);
+        for (const [x, y] of effect.affectedCells()) {
+            this.effectGrid.get(x, y)?.push(effect);
+            this.asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
+        }
+    }
+
+    public clearEffects(x: number, y: number) {
+        const effects = this.effectGrid.get(x, y);
+        if (effects) effects.length = 0;
+    }
+
+    public getEffects(x: number, y: number): readonly SimulationEffect<T>[] {
+        return this.effectGrid.get(x, y) ?? [];
+    }
+
+    public tick() {
+        // Increment all effects
+        for (const effect of this.effects) {
+            effect.nextTick();
+        }
+        for (let i = 0; i < this.effects.length; i++) {
+            if (this.effects[i].done()) {
+                // PERF: swap_remove
+                this.effects.splice(i, 1);
+                i--;
             }
-        },
-        clearEffects(x: number, y: number) {
-            const effects = effectGrid.get(x, y);
-            if (effects) effects.length = 0;
-        },
-        getEffects(x: number, y: number) {
-            return effectGrid.get(x, y) ?? [];
-        },
-        tick() {
-            // Increment all effects
-            for (const effect of effects) {
-                effect.nextTick();
-            }
-            for (let i = 0; i < effects.length; i++) {
-                if (effects[i].done()) {
+        }
+
+        iterAwake(this.effectGrid, this.asleep, ASLEEP_RATIO, (effects, x, y) => {
+            let stayAwake = this.effects.length > 0;
+            // Mark cells with effects as dirty and remove effects that are done
+            if (this.effects.length > 0) this.dirty.set(x, y, true);
+            for (let i = 0; i < this.effects.length; i++) {
+                if (this.effects[i].done()) {
                     // PERF: swap_remove
-                    effects.splice(i, 1);
+                    this.effects.splice(i, 1);
                     i--;
                 }
             }
 
-            iterAwake(effectGrid, asleep, ASLEEP_RATIO, (effects, x, y) => {
-                let stayAwake = effects.length > 0;
-                // Mark cells with effects as dirty and remove effects that are done
-                if (effects.length > 0) dirty.set(x, y, true);
-                for (let i = 0; i < effects.length; i++) {
-                    if (effects[i].done()) {
-                        // PERF: swap_remove
-                        effects.splice(i, 1);
-                        i--;
-                    }
-                }
+            // Run onTick on the existing cells
+            const sleep = this._onTick(this.cells.get(x, y)!, x, y, this);
+            if (sleep !== SLEEP) stayAwake = true;
 
-                // Run onTick on the existing cells
-                const sleep = onTick(cells.get(x, y)!, x, y, res);
-                if (sleep !== SLEEP) stayAwake = true;
+            return stayAwake;
+        }, this.options.performance?.wakeRadius ?? 0, true);
 
-                return stayAwake;
-            }, options.performance?.wakeRadius ?? 0, true);
+        // Resize the simulation area if needed
+        const newBounds = getSimulationBounds(this.options.simulationBounds);
+        if (!rectsEqual(newBounds, this.cells.getRect())) {
+            this.resize(newBounds);
+        }
 
-            // Resize the simulation area if needed
-            const newBounds = getSimulationBounds();
-            if (!rectsEqual(newBounds, cells.getRect())) {
-                resize(newBounds);
+        // Trigger the updates
+        for (const [x, y, update] of this.actions) {
+            let prev = this.cells.get(x, y);
+            if (prev !== null) {
+                this.cells.set(x, y, update(prev));
+                this.dirty.set(x, y, true);
+                this.asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
             }
+        }
 
-            // Trigger the updates
-            for (const [x, y, update] of actions) {
-                let prev = cells.get(x, y);
-                if (prev !== null) {
-                    cells.set(x, y, update(prev));
-                    dirty.set(x, y, true);
-                    asleep.set(Math.floor(x / ASLEEP_RATIO), Math.floor(y / ASLEEP_RATIO), false);
-                }
-            }
+        this.actions.length = 0;
+        this.currentTick += 1;
+    }
 
-            actions.length = 0;
-        },
-        render(canvas: HTMLCanvasElement, font: Font, rectOpt?: Rect, _rerender?: boolean) {
+    getTick(): number {
+        return this.currentTick;
+    }
+
+    render(canvas: HTMLCanvasElement, font: Font, rectOpt?: Rect, _rerender?: boolean) {
+        const rect = rectOpt ?? this.cells.getRect();
+
+        if (this._previousCanvas === null) {
+            // First render
+            this._previousCanvas = canvas;
+            this._previousRect = rect;
+            this.renderDirty(canvas, font, rect);
+        } else {
             let rerender = _rerender ?? false;
-            const rect = rectOpt ?? cells.getRect();
-            if (!rectsEqual(previousRect, rect)) {
-                previousRect = rect;
-                // Only trigger a redraw on subsequent draws
-                if (previousCanvas !== null) rerender = true;
+            if (!rectsEqual(this._previousRect, rect)) {
+                this._previousRect = rect;
+                rerender = true;
             }
-            if (canvas !== previousCanvas) {
-                if (previousCanvas !== null) rerender = true;
-                previousCanvas = canvas;
+            if (canvas !== this._previousCanvas) {
+                rerender = true;
+                this._previousCanvas = canvas;
             }
 
-            if (rerender || options.debug?.alwaysRender) {
-                performance.mark("Rerender");
-                renderAll(cells, dirty, effectGrid, canvas, options, font, rect, res);
+            if (rerender || this.options.debug?.alwaysRender) {
+                if (this.options.debug?.logPerformance) performance.mark("[ascii-cell] Rerender");
+                this.renderAll(canvas, font, rect);
             } else {
-                renderDirty(cells, dirty, effectGrid, canvas, options, font, rect, res);
+                this.renderDirty(canvas, font, rect);
             }
+        }
 
-            if (options.debug?.sleep) {
-                const ctx = canvas.getContext("2d")!;
-                for (let gy = asleep.top; gy < asleep.top + asleep.height; gy++) {
-                    for (let gx = asleep.left; gx < asleep.left + asleep.width; gx++) {
-                        ctx.globalCompositeOperation = "source-over";
-                        if (asleep.get(gx, gy)) {
-                            ctx.fillStyle = "rgba(200, 100, 160, 0.2)";
-                        } else {
-                            ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
-                        }
-                        ctx.fillRect(
-                            (gx * ASLEEP_RATIO - rect.x) * font.charWidth(),
-                            (gy * ASLEEP_RATIO - rect.y) * font.charHeight(),
-                            ASLEEP_RATIO * font.charWidth(),
-                            ASLEEP_RATIO * font.charHeight()
-                        );
-                    }
+        if (this.options.debug?.sleep) {
+            this.debugSleep(canvas, font, rect);
+        }
+    }
+
+    private debugSleep(
+        canvas: HTMLCanvasElement,
+        font: Font,
+        rect: Rect,
+    ) {
+        const ctx = canvas.getContext("2d")!;
+        for (let gy = this.asleep.top; gy < this.asleep.top + this.asleep.height; gy++) {
+            for (let gx = this.asleep.left; gx < this.asleep.left + this.asleep.width; gx++) {
+                ctx.globalCompositeOperation = "source-over";
+                if (this.asleep.get(gx, gy)) {
+                    ctx.fillStyle = "rgba(200, 100, 160, 0.2)";
+                } else {
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
+                }
+                ctx.fillRect(
+                    (gx * ASLEEP_RATIO - rect.x) * font.charWidth(),
+                    (gy * ASLEEP_RATIO - rect.y) * font.charHeight(),
+                    ASLEEP_RATIO * font.charWidth(),
+                    ASLEEP_RATIO * font.charHeight()
+                );
+            }
+        }
+    }
+
+    private renderDirty(
+        canvas: HTMLCanvasElement,
+        font: Font,
+        rect: Rect,
+    ) {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Could not get 2D context");
+
+        let rendered = 0;
+
+        for (let y = rect.y; y < rect.y + rect.height; y++) {
+            for (let x = rect.x; x < rect.x + rect.width; x++) {
+                if (!this.dirty.get(x, y)) continue;
+                rendered += 1;
+                const effects = this.effectGrid.get(x, y)!;
+                this.dirty.set(x, y, false);
+
+                this.renderSingle(ctx, x, y, font, rect, effects);
+            }
+        }
+
+        if (this.options.debug?.logPerformance) performance.mark(`Rendered: ${rendered}`);
+    }
+
+
+    /// Requires that `(x, y)` be in bounds of `cells`
+    private renderSingle(
+        ctx: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        font: Font,
+        rect: Rect,
+        effects: SimulationEffect<T>[],
+    ) {
+        const state = this.cells.get(x, y)!;
+
+        const processed: ProcessedCell<T> = {
+            state,
+            x,
+            y,
+            glyph: this.options.getChar(state, x, y),
+            fg: this.options.getColor(state, x, y),
+            bg: this.options.getBackground(state, x, y)
+        };
+
+        for (let i = 0; i < effects.length; i++) {
+            if (effects[i].done()) {
+                effects.splice(i, 1);
+                i--;
+                continue;
+            }
+            effects[i].tweakCell(processed, this);
+        }
+
+        font.drawChar(
+            ctx,
+            processed.glyph,
+            x - rect.x,
+            y - rect.y,
+            processed.fg,
+            processed.bg,
+        );
+    }
+
+    private renderAll(
+        canvas: HTMLCanvasElement,
+        font: Font,
+        rect: Rect,
+    ) {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Could not get 2D context");
+
+        for (let y = rect.y; y < rect.y + rect.height; y++) {
+            for (let x = rect.x; x < rect.x + rect.width; x++) {
+                if (this.dirty.set(x, y, false)) {
+                    const effects = this.effectGrid.get(x, y)!;
+                    this.renderSingle(ctx, x, y, font, rect, effects);
                 }
             }
         }
-    } satisfies SimulationHandle<T>;
-
-    options.onInit?.(res);
-
-    return res;
+    }
 }
+export default Simulation;
 
 class Grid<T extends CellCompatible> {
     private _width: number;
@@ -440,98 +559,4 @@ function iterAwake<T extends CellCompatible>(
             }
         }
     }
-}
-
-/// Requires that `(x, y)` be in bounds of `cells`
-function renderSingle<T extends CellCompatible>(
-    ctx: CanvasRenderingContext2D,
-    cells: Grid<T>,
-    x: number,
-    y: number,
-    options: SimulationOptions<T>,
-    font: Font,
-    rect: Rect,
-    effects: SimulationEffect<T>[],
-    handle: SimulationHandle<T>,
-) {
-    const state = cells.get(x, y)!;
-
-    const processed: ProcessedCell<T> = {
-        state,
-        x,
-        y,
-        glyph: options.getChar(state, x, y),
-        fg: options.getColor(state, x, y),
-        bg: options.getBackground(state, x, y)
-    };
-
-    for (let i = 0; i < effects.length; i++) {
-        if (effects[i].done()) {
-            effects.splice(i, 1);
-            i--;
-            continue;
-        }
-        effects[i].tweakCell(processed, handle);
-    }
-
-    font.drawChar(
-        ctx,
-        processed.glyph,
-        x - rect.x,
-        y - rect.y,
-        processed.fg,
-        processed.bg,
-    );
-}
-
-function renderAll<T extends CellCompatible>(
-    cells: Grid<T>,
-    dirty: Grid<boolean>,
-    effectGrid: Grid<SimulationEffect<T>[]>,
-    canvas: HTMLCanvasElement,
-    options: SimulationOptions<T>,
-    font: Font,
-    rect: Rect,
-    handle: SimulationHandle<T>,
-) {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not get 2D context");
-
-    for (let y = rect.y; y < rect.y + rect.height; y++) {
-        for (let x = rect.x; x < rect.x + rect.width; x++) {
-            if (dirty.set(x, y, false)) {
-                const effects = effectGrid.get(x, y)!;
-                renderSingle(ctx, cells, x, y, options, font, rect, effects, handle);
-            }
-        }
-    }
-}
-
-function renderDirty<T extends CellCompatible>(
-    cells: Grid<T>,
-    dirty: Grid<boolean>,
-    effectGrid: Grid<SimulationEffect<T>[]>,
-    canvas: HTMLCanvasElement,
-    options: SimulationOptions<T>,
-    font: Font,
-    rect: Rect,
-    handle: SimulationHandle<T>,
-) {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not get 2D context");
-
-    let rendered = 0;
-
-    for (let y = rect.y; y < rect.y + rect.height; y++) {
-        for (let x = rect.x; x < rect.x + rect.width; x++) {
-            if (!dirty.get(x, y)) continue;
-            rendered += 1;
-            const effects = effectGrid.get(x, y)!;
-            dirty.set(x, y, false);
-
-            renderSingle(ctx, cells, x, y, options, font, rect, effects, handle);
-        }
-    }
-
-    performance.mark(`Rendered: ${rendered}`);
 }

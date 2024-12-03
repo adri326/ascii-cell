@@ -1,4 +1,5 @@
-import type { CellCompatible, Rect, SimulationHandle } from "./simulation.js";
+import type { CellCompatible, Rect } from "./simulation.js";
+import type Simulation from "./simulation.js";
 import { mixColor, type Color } from "./color.js";
 
 /** Temporary data structure used by `Simulation.render`
@@ -35,14 +36,14 @@ export interface SimulationEffect<T extends CellCompatible> {
      * To modify any of the visual properties (foreground, background, glyph),
      * simply mutate `cell`.
      */
-    tweakCell(cell: ProcessedCell<T>, handle: SimulationHandle<T>): void;
+    tweakCell(cell: ProcessedCell<T>, handle: Simulation<T>): void;
 };
 
 /**
  * A single-cell effect that mixes its base color with another,
  * with the amount decreasing after each tick.
  */
-export class FadeEffect implements SimulationEffect<CellCompatible> {
+export class FadeEffect<T extends CellCompatible> implements SimulationEffect<T> {
     /** Linear interpolation. */
     static LINEAR(t: number): number {
         return 1.0 - t;
@@ -95,7 +96,6 @@ export class FadeEffect implements SimulationEffect<CellCompatible> {
     }
 
     nextTick(): void {
-
         this.tick++;
     }
 
@@ -103,7 +103,7 @@ export class FadeEffect implements SimulationEffect<CellCompatible> {
         return this.tick >= this.length;
     }
 
-    tweakCell(cell: ProcessedCell<CellCompatible>, _handle: SimulationHandle<CellCompatible>): void {
+    tweakCell(cell: ProcessedCell<T>, _handle: Simulation<T>): void {
         const amount = this.easing(this.tick > 0 ? this.tick / (this.length - 1) : 0);
         if (this.fg) {
             cell.fg = mixColor(cell.fg, this.fg!, amount);
